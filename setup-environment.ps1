@@ -2,20 +2,7 @@
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-function Assert-Prerequisites {
-    if ($env:OS -ne 'Windows_NT') {
-        throw 'This script only runs on Windows.'
-    }
-    if (-not $env:LOCALAPPDATA) {
-        throw 'LOCALAPPDATA is missing; installation for the current user is not possible.'
-    }
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Run Windows PowerShell without administrator privileges for a per-user installation.'
-    }
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-}
+. (Join-Path $PSScriptRoot 'scripts\setup-common.ps1')
 
 function Get-ArchitectureInfo {
     switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -47,17 +34,10 @@ function New-DownloadDirectory {
     return $directory
 }
 
-function Remove-DownloadDirectory {
-    param([string]$Directory)
-
-    if (Test-Path -LiteralPath $Directory) {
-        Remove-Item -LiteralPath $Directory -Recurse -Force
-    }
-}
-
 function Get-Download {
     param([string]$Url, [string]$Destination)
 
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Write-Host "Downloading: $Url"
     Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
 }
@@ -71,31 +51,10 @@ function Assert-Hash {
     }
 }
 
-function Add-UserPath {
-    param([string]$Directory)
-
-    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
-        throw "Cannot add $Directory to PATH: the directory does not exist."
-    }
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $userEntries = @($userPath -split ';' | Where-Object { $_ })
-    if (-not @($userEntries | Where-Object { $_.TrimEnd('\') -ieq $Directory.TrimEnd('\') }).Count) {
-        $newPath = if ($userPath) { "$Directory;$userPath" } else { $Directory }
-        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    }
-    $processEntries = @($env:Path -split ';' | Where-Object { $_ })
-    if (-not @($processEntries | Where-Object { $_.TrimEnd('\') -ieq $Directory.TrimEnd('\') }).Count) {
-        $env:Path = "$Directory;$env:Path"
-    }
-}
-
 function Assert-Command {
     param([string]$Executable, [string]$Argument)
 
-    $output = & $Executable $Argument
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Executable $Argument failed (exit code $LASTEXITCODE)."
-    }
+    $output = @(Get-ExecutableOutput $Executable $Argument)
     Write-Host ($output -join [Environment]::NewLine)
 }
 
@@ -103,26 +62,45 @@ function Install-Node {
     param($Architecture, [string]$DownloadDirectory)
 
     $nodeVersion = 'v24.21.0'
-    $installRoot = Join-Path $env:LOCALAPPDATA 'AI-Development-Course'
-    $nodeFolder = "node-$nodeVersion-win-$($Architecture.Platform)"
-    $nodeDirectory = Join-Path $installRoot $nodeFolder
-    $nodeExe = Join-Path $nodeDirectory 'node.exe'
-    $npmCmd = Join-Path $nodeDirectory 'npm.cmd'
-    if (-not ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $npmCmd))) {
+    $installRoot = Get-CourseRoot
+    $managedDirectory = Get-ManagedInstallPath 'Node'
+    $nodeFolder = Split-Path -Leaf $managedDirectory
+    $managedExe = Join-Path $managedDirectory 'node.exe'
+    $nodeExe = Get-ExistingExecutable 'node.exe' @($managedExe, (Join-Path $env:ProgramFiles 'nodejs\node.exe'))
+    $installed = $false
+    if (-not $nodeExe) {
+        Assert-ManagedDestinationAvailable 'Node'
         $nodeZip = Join-Path $DownloadDirectory "$nodeFolder.zip"
         Get-Download "https://nodejs.org/dist/$nodeVersion/$nodeFolder.zip" $nodeZip
         Assert-Hash $nodeZip $Architecture.NodeHash
         New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
         Expand-Archive -LiteralPath $nodeZip -DestinationPath $installRoot -Force
+        $nodeExe = $managedExe
+        $installed = $true
+    } else {
+        Write-Host "Using existing Node.js: $nodeExe"
     }
+    $nodeDirectory = Split-Path -Parent $nodeExe
+    $npmCmd = Join-Path $nodeDirectory 'npm.cmd'
     if (-not ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $npmCmd))) {
         throw "Node.js or npm is missing after extraction to $nodeDirectory."
     }
-    Add-UserPath $nodeDirectory
-    Assert-Command $nodeExe '--version'
-    if ((& $nodeExe --version) -ne $nodeVersion) {
-        throw "Unexpected Node.js version in $nodeDirectory; expected $nodeVersion."
+    $version = Get-ExecutableOutput $nodeExe '--version'
+    $parsedVersion = [regex]::Match([string]$version, '^v(\d+)\.(\d+)\.(\d+)$')
+    if (-not $parsedVersion.Success) {
+        throw "Unable to determine the Node.js version at $nodeExe."
     }
+    $major = [int]$parsedVersion.Groups[1].Value
+    $minor = [int]$parsedVersion.Groups[2].Value
+    if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 12) -or $major % 2 -ne 0) {
+        throw "Existing Node.js $version is not supported by this course; use Node.js 22.12+ LTS or 24+."
+    }
+    if ($installed) {
+        Set-Receipt 'Node' $nodeDirectory $nodeDirectory $true $false
+    }
+    $pathAdded = Add-UserPath $nodeDirectory
+    Set-Receipt 'Node' $nodeDirectory $nodeDirectory $installed $pathAdded
+    Write-Host $version
     Assert-Command $npmCmd '--version'
 }
 
@@ -130,99 +108,102 @@ function Install-Git {
     param($Architecture, [string]$DownloadDirectory)
 
     $gitVersion = '2.55.0.5'
-    $gitDirectory = Join-Path $env:LOCALAPPDATA 'Programs\Git'
-    $gitExe = Join-Path $gitDirectory 'cmd\git.exe'
-    if (-not (Test-Path -LiteralPath $gitExe)) {
-        $existingGit = Get-Command git.exe -ErrorAction SilentlyContinue
-        if ($existingGit) {
-            $gitExe = $existingGit.Source
-        } else {
-            $gitInstaller = Join-Path $DownloadDirectory "Git-$gitVersion-$($Architecture.GitPlatform).exe"
-            $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-$gitVersion-$($Architecture.GitPlatform).exe"
-            Get-Download $gitUrl $gitInstaller
-            Assert-Hash $gitInstaller $Architecture.GitHash
-            $arguments = "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /SP- /DIR=`"$gitDirectory`" /o:UseCredentialManager=Enabled /o:PathOption=Cmd"
-            $result = Start-Process -FilePath $gitInstaller -ArgumentList $arguments -Wait -PassThru
-            if ($result.ExitCode -ne 0) {
-                throw "Git installation failed (exit code $($result.ExitCode))."
-            }
+    $gitDirectory = Get-ManagedInstallPath 'Git'
+    $managedExe = Join-Path $gitDirectory 'cmd\git.exe'
+    $gitExe = Get-ExistingExecutable 'git.exe' @($managedExe, (Join-Path $env:ProgramFiles 'Git\cmd\git.exe'))
+    $installed = $false
+    if (-not $gitExe) {
+        Assert-ManagedDestinationAvailable 'Git'
+        $gitInstaller = Join-Path $DownloadDirectory "Git-$gitVersion-$($Architecture.GitPlatform).exe"
+        $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-$gitVersion-$($Architecture.GitPlatform).exe"
+        Get-Download $gitUrl $gitInstaller
+        Assert-Hash $gitInstaller $Architecture.GitHash
+        $arguments = "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /SP- /DIR=`"$gitDirectory`" /o:UseCredentialManager=Enabled /o:PathOption=Cmd"
+        $result = Start-Process -FilePath $gitInstaller -ArgumentList $arguments -Wait -PassThru
+        if ($result.ExitCode -ne 0) {
+            throw "Git installation failed (exit code $($result.ExitCode))."
         }
+        $gitExe = $managedExe
+        $installed = $true
+    } else {
+        Write-Host "Using existing Git: $gitExe"
     }
     if (-not (Test-Path -LiteralPath $gitExe)) {
         throw "Git is missing after installation in $gitDirectory."
     }
-    if ($gitExe -eq (Join-Path $gitDirectory 'cmd\git.exe')) {
-        Add-UserPath (Join-Path $gitDirectory 'cmd')
-    }
     Assert-Command $gitExe '--version'
+    $gitPath = Split-Path -Parent $gitExe
+    if ($installed) {
+        Set-Receipt 'Git' $gitDirectory $gitPath $true $false
+    }
+    $pathAdded = Add-UserPath $gitPath
+    Set-Receipt 'Git' $(if ($installed) { $gitDirectory } else { Split-Path -Parent $gitPath }) $gitPath $installed $pathAdded
 }
 
 function Install-VSCode {
     param($Architecture, [string]$DownloadDirectory)
 
     $codeVersion = '1.139.1'
-    $codeDirectory = Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code'
-    $codeCli = Join-Path $codeDirectory 'bin\code.cmd'
-    if (-not (Test-Path -LiteralPath $codeCli)) {
-        $existingCode = Get-Command code.cmd -ErrorAction SilentlyContinue
-        if ($existingCode) {
-            $codeCli = $existingCode.Source
-        } else {
-            $codeInstaller = Join-Path $DownloadDirectory 'VSCodeUserSetup.exe'
-            Get-Download "https://update.code.visualstudio.com/$codeVersion/win32-$($Architecture.Platform)-user/stable" $codeInstaller
-            $signature = Get-AuthenticodeSignature -FilePath $codeInstaller
-            if ($signature.Status -ne 'Valid' -or
-                -not $signature.SignerCertificate -or
-                $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
-                throw 'The VS Code installer has no valid Microsoft digital signature.'
-            }
-            $result = Start-Process -FilePath $codeInstaller -ArgumentList '/VERYSILENT /NORESTART /MERGETASKS=!runcode' -Wait -PassThru
-            if ($result.ExitCode -ne 0) {
-                throw "VS Code installation failed (exit code $($result.ExitCode))."
-            }
+    $codeDirectory = Get-ManagedInstallPath 'VSCode'
+    $managedCli = Join-Path $codeDirectory 'bin\code.cmd'
+    $codeCli = Get-ExistingExecutable 'code.cmd' @($managedCli, (Join-Path $env:ProgramFiles 'Microsoft VS Code\bin\code.cmd'))
+    $installed = $false
+    if (-not $codeCli) {
+        Assert-ManagedDestinationAvailable 'VSCode'
+        $codeInstaller = Join-Path $DownloadDirectory 'VSCodeUserSetup.exe'
+        Get-Download "https://update.code.visualstudio.com/$codeVersion/win32-$($Architecture.Platform)-user/stable" $codeInstaller
+        $signature = Get-AuthenticodeSignature -FilePath $codeInstaller
+        if ($signature.Status -ne 'Valid' -or
+            -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw 'The VS Code installer has no valid Microsoft digital signature.'
         }
+        $result = Start-Process -FilePath $codeInstaller -ArgumentList '/VERYSILENT /NORESTART /MERGETASKS=!runcode' -Wait -PassThru
+        if ($result.ExitCode -ne 0) {
+            throw "VS Code installation failed (exit code $($result.ExitCode))."
+        }
+        $codeCli = $managedCli
+        $installed = $true
+    } else {
+        Write-Host "Using existing VS Code: $codeCli"
     }
     if (-not (Test-Path -LiteralPath $codeCli)) {
         throw "VS Code is missing after installation in $codeDirectory."
     }
-    if ($codeCli -eq (Join-Path $codeDirectory 'bin\code.cmd')) {
-        Add-UserPath (Join-Path $codeDirectory 'bin')
+    $versionOutput = @(Get-ExecutableOutput $codeCli '--version')
+    if ($versionOutput.Count -eq 0) {
+        throw "Unable to determine the VS Code version at $codeCli."
     }
-    Assert-Command $codeCli '--version'
-    return $codeCli
-}
-
-function Install-VSCodeExtensions {
-    param([string]$CodeCli)
-
-    $installedExtensions = @(& $CodeCli --list-extensions)
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to list VS Code extensions.'
+    $parsedVersion = [regex]::Match([string]$versionOutput[0], '^(\d+)\.(\d+)\.(\d+)$')
+    if (-not $parsedVersion.Success) {
+        throw "Unable to determine the VS Code version at $codeCli."
     }
-    foreach ($extension in @('GitHub.copilot', 'dbaeumer.vscode-eslint', 'esbenp.prettier-vscode')) {
-        if ($installedExtensions -notcontains $extension) {
-            & $CodeCli --install-extension $extension
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to install VS Code extension $extension."
-            }
-        }
+    if ([int]$parsedVersion.Groups[1].Value -lt 1 -or
+        ([int]$parsedVersion.Groups[1].Value -eq 1 -and [int]$parsedVersion.Groups[2].Value -lt 116)) {
+        throw 'VS Code 1.116 or newer is required for built-in Copilot; update VS Code first.'
     }
+    if ($installed) {
+        Set-Receipt 'VSCode' $codeDirectory (Split-Path -Parent $codeCli) $true $false
+    }
+    $codePath = Split-Path -Parent $codeCli
+    $pathAdded = Add-UserPath $codePath
+    Set-Receipt 'VSCode' $(if ($installed) { $codeDirectory } else { Split-Path -Parent $codePath }) $codePath $installed $pathAdded
+    Write-Host ($versionOutput -join [Environment]::NewLine)
 }
 
 function Show-NextSteps {
-    Write-Host 'Done. Open a new terminal and sign in to GitHub in VS Code to use Copilot.'
+    Write-Host 'Done. Open a new terminal, then sign in to GitHub in VS Code to use its built-in Copilot features.'
 }
 
 function Invoke-CourseSetup {
-    Assert-Prerequisites
+    Assert-SetupPrerequisites
     $architecture = Get-ArchitectureInfo
     $downloadDirectory = New-DownloadDirectory
 
     try {
         Install-Node $architecture $downloadDirectory
         Install-Git $architecture $downloadDirectory
-        $codeCli = Install-VSCode $architecture $downloadDirectory
-        Install-VSCodeExtensions $codeCli
+        Install-VSCode $architecture $downloadDirectory
         Show-NextSteps
     } finally {
         Remove-DownloadDirectory $downloadDirectory
