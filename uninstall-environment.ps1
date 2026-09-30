@@ -30,84 +30,36 @@ function Get-ManagedPathEntry {
     }
 }
 
-function Test-PreviousSetupInstallation {
-    param([ValidateSet('Node', 'Git', 'VSCode')][string]$Component)
-
-    $directory = Get-ManagedInstallPath $Component
-    switch ($Component) {
-        'Node' {
-            $exe = Join-Path $directory 'node.exe'
-            if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or
-                -not (Test-Path -LiteralPath (Join-Path $directory 'npm.cmd') -PathType Leaf)) {
-                return $false
-            }
-            $version = Get-ExecutableOutput $exe '--version'
-            return ($version -eq 'v24.21.0')
-        }
-        'Git' {
-            $exe = Join-Path $directory 'cmd\git.exe'
-            if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or
-                -not (Test-Path -LiteralPath (Join-Path $directory 'unins000.exe') -PathType Leaf)) {
-                return $false
-            }
-            $version = Get-ExecutableOutput $exe '--version'
-            return ($version -eq 'git version 2.55.0.windows.5')
-        }
-        'VSCode' {
-            $exe = Join-Path $directory 'bin\code.cmd'
-            if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or
-                -not (Test-Path -LiteralPath (Join-Path $directory 'unins000.exe') -PathType Leaf)) {
-                return $false
-            }
-            $version = @(Get-ExecutableOutput $exe '--version')
-            return ($version.Count -gt 0 -and $version[0] -eq '1.139.1')
-        }
-    }
-}
-
 function Select-Removal {
     param([ValidateSet('Node', 'Git', 'VSCode')][string]$Component)
 
+    $name = switch ($Component) {
+        'Node' { 'Node.js' }
+        'VSCode' { 'VS Code' }
+        default { $Component }
+    }
     $receipt = Get-Receipt $Component
     $managed = Get-ManagedInstallPath $Component
     $expectedPath = Get-ManagedPathEntry $Component
-    if ($receipt -and $receipt.Installed -and
-        ($receipt.InstallPath -ine $managed -or $receipt.PathEntry -ine $expectedPath)) {
+    if (-not $receipt) {
+        Write-Host "No course-installed $name to remove."
+        return $null
+    }
+    if (-not $receipt.Installed) {
+        Write-Host "$name was not installed by this setup; keeping its PATH."
+        return $null
+    }
+    if ($receipt.InstallPath -ine $managed -or $receipt.PathEntry -ine $expectedPath) {
         throw "The $Component receipt does not match the managed installation. Nothing was removed."
     }
 
-    if ($receipt -and $receipt.Installed) {
-        $question = "Uninstall course-installed $Component at '$managed'?"
-        $legacy = $false
-    } elseif ($receipt -and $receipt.PathAdded) {
-        $question = "Remove the course-added $Component PATH entry '$($receipt.PathEntry)'? The pre-existing app stays installed."
-        if (-not (Confirm-Removal $question)) {
-            return $null
-        }
-        return [pscustomobject]@{
-            Component = $Component
-            InstallPath = $receipt.InstallPath
-            PathEntry = $receipt.PathEntry
-            RemoveApp = $false
-            RemovePath = $true
-        }
-    } elseif (Test-PreviousSetupInstallation $Component) {
-        $question = "Only if the PREVIOUS version of the course script installed $Component at '$managed': uninstall it?"
-        $legacy = $true
-    } else {
-        Write-Host "$Component`: no setup-managed installation to remove."
-        return $null
-    }
-
-    if (-not (Confirm-Removal $question)) {
+    if (-not (Confirm-Removal "Uninstall ${name}?")) {
         return $null
     }
     return [pscustomobject]@{
         Component = $Component
         InstallPath = $managed
         PathEntry = $expectedPath
-        RemoveApp = $true
-        RemovePath = ($legacy -or $receipt.PathAdded)
     }
 }
 
@@ -170,16 +122,12 @@ function Uninstall-ManagedApp {
 function Remove-SelectedComponent {
     param($Choice)
 
-    if ($Choice.RemoveApp) {
-        if ($Choice.Component -eq 'Node') {
-            Remove-ManagedNode $Choice.InstallPath
-        } else {
-            Uninstall-ManagedApp $Choice.Component $Choice.InstallPath
-        }
+    if ($Choice.Component -eq 'Node') {
+        Remove-ManagedNode $Choice.InstallPath
+    } else {
+        Uninstall-ManagedApp $Choice.Component $Choice.InstallPath
     }
-    if ($Choice.RemovePath) {
-        Remove-UserPath $Choice.PathEntry
-    }
+    Remove-UserPath $Choice.PathEntry
     Remove-Receipt $Choice.Component
     Write-Host "Removed selected course setup for $($Choice.Component)."
 }

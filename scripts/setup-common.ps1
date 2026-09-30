@@ -148,12 +148,12 @@ function Add-UserPath {
     return $added
 }
 
-function Remove-FirstPathEntry {
+function Remove-PathEntries {
     param([string]$PathValue, [string]$Directory)
 
     $removed = $false
     $remaining = @(foreach ($entry in ($PathValue -split ';')) {
-        if (-not $removed -and $entry.Trim().Trim('"').TrimEnd('\') -ieq $Directory.TrimEnd('\')) {
+        if (Test-PathEntry $entry $Directory) {
             $removed = $true
             continue
         }
@@ -169,11 +169,11 @@ function Remove-UserPath {
     param([string]$Directory)
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $remaining = Remove-FirstPathEntry $userPath $Directory
+    $remaining = Remove-PathEntries $userPath $Directory
     if ($userPath -and $remaining -cne $userPath) {
         [Environment]::SetEnvironmentVariable('Path', $remaining, 'User')
     }
-    $env:Path = Remove-FirstPathEntry $env:Path $Directory
+    $env:Path = Remove-PathEntries $env:Path $Directory
 }
 
 function Get-ExistingExecutable {

@@ -54,10 +54,10 @@ $env:PROCESSOR_ARCHITECTURE = 'AMD64'
 $env:ProgramFiles = $testRoot
 
 try {
-    Assert-Equal (Remove-FirstPathEntry 'C:\tool;C:\tool;C:\other' 'C:\tool') 'C:\tool;C:\other'
-    Assert-Equal (Remove-FirstPathEntry '%LOCALAPPDATA%\tool;C:\tool' 'C:\tool') '%LOCALAPPDATA%\tool'
-    Assert-Equal (Remove-FirstPathEntry 'C:\tool;;C:\other;' 'C:\tool') ';C:\other;'
-    Assert-Equal (Remove-FirstPathEntry 'C:\other;;' 'C:\tool') 'C:\other;;'
+    Assert-Equal (Remove-PathEntries 'C:\tool;C:\tool;C:\other' 'C:\tool') 'C:\other'
+    Assert-Equal (Remove-PathEntries '%LOCALAPPDATA%\tool;C:\tool' 'C:\tool') '%LOCALAPPDATA%\tool'
+    Assert-Equal (Remove-PathEntries 'C:\tool;;C:\other;' 'C:\tool') ';C:\other;'
+    Assert-Equal (Remove-PathEntries 'C:\other;;' 'C:\tool') 'C:\other;;'
 
     $nodePath = Get-ManagedInstallPath 'Node'
     Set-Receipt 'Node' $nodePath $nodePath $false $true
@@ -81,37 +81,40 @@ try {
         }
         return $script:Replies.Dequeue()
     }
-    function Test-PreviousSetupInstallation {
-        param($Component)
-        return $true
-    }
-
+    Assert-Equal (Select-Removal 'Node') $null
+    Assert-Equal $script:Actions.Count 0
+    Assert-Equal (Get-Receipt 'Node').PathAdded $true
+    Remove-Receipt 'Node'
+    Set-Receipt 'Node' $nodePath $nodePath $true $false
     $script:Replies.Enqueue('y')
     $nodeChoice = Select-Removal 'Node'
-    Assert-Equal $nodeChoice.RemoveApp $false
-    Assert-Equal $nodeChoice.RemovePath $true
+    Assert-Equal $nodeChoice.PathEntry $nodePath
 
     $gitPath = Get-ManagedInstallPath 'Git'
     $gitEntry = Join-Path $gitPath 'cmd'
+    $gitExe = Join-Path $gitPath 'cmd\git.exe'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $gitExe) -Force | Out-Null
+    Set-Content -LiteralPath $gitExe -Value 'test stub'
+    Assert-Equal (Select-Removal 'Git') $null
+    Assert-Equal $script:Actions.Count 1
+    Assert-Equal (Test-Path -LiteralPath $gitExe) $true
+    Remove-Item -LiteralPath $gitExe
+    Set-Receipt 'Git' $gitPath $gitEntry $true $false
     $script:Replies.Enqueue('n')
     Assert-Equal (Select-Removal 'Git') $null
     $script:Replies.Enqueue('y')
-    $legacyChoice = Select-Removal 'Git'
-    Assert-Equal $legacyChoice.RemoveApp $true
-    Assert-Equal $legacyChoice.RemovePath $true
-
-    Set-Receipt 'Git' $gitPath $gitEntry $true $false
-    $script:Replies.Enqueue('y')
     $gitChoice = Select-Removal 'Git'
-    Assert-Equal $gitChoice.RemoveApp $true
-    Assert-Equal $gitChoice.RemovePath $false
+    Assert-Equal $gitChoice.PathEntry $gitEntry
 
     $codePath = Get-ManagedInstallPath 'VSCode'
     Set-Receipt 'VSCode' $codePath (Join-Path $codePath 'bin') $true $true
     $script:Replies.Enqueue('y')
     $codeChoice = Select-Removal 'VSCode'
-    Assert-Equal $codeChoice.RemoveApp $true
-    Assert-Equal $codeChoice.RemovePath $true
+    Assert-Equal $codeChoice.PathEntry (Join-Path $codePath 'bin')
+    Assert-Equal $script:Actions[0] 'prompt:Uninstall Node.js? [y/N]'
+    Assert-Equal $script:Actions[1] 'prompt:Uninstall Git? [y/N]'
+    Assert-Equal $script:Actions[2] $script:Actions[1]
+    Assert-Equal $script:Actions[3] 'prompt:Uninstall VS Code? [y/N]'
 
     $nodeDirectory = Get-ManagedInstallPath 'Node'
     New-Item -ItemType Directory -Path $nodeDirectory -Force | Out-Null
@@ -142,14 +145,19 @@ try {
         $script:Actions.Add("path:$Directory")
     }
     Remove-SelectedComponent $nodeChoice
-    Assert-Equal (Test-Path -LiteralPath $nodeDirectory) $true
+    Assert-Equal (Test-Path -LiteralPath $nodeDirectory) $false
+    Assert-Equal $script:Actions[$script:Actions.Count - 1] "path:$nodePath"
     Assert-Equal (Get-Receipt 'Node') $null
-    Set-Receipt 'Node' $nodePath $nodePath $false $true
+    Set-Receipt 'Node' $nodePath $nodePath $true $false
 
+    $actionsBeforeFailure = $script:Actions.Count
     Assert-Throws { Remove-SelectedComponent $gitChoice } 'exit code 7'
+    Assert-Equal $script:Actions.Count ($actionsBeforeFailure + 1)
+    Assert-Equal ($script:Actions[$script:Actions.Count - 1] -like 'uninstaller:*') $true
     Assert-Equal (Get-Receipt 'Git').Installed $true
     $script:ExitCode = 0
     Remove-SelectedComponent $gitChoice
+    Assert-Equal $script:Actions[$script:Actions.Count - 1] "path:$gitEntry"
     Assert-Equal (Get-Receipt 'Git') $null
     Set-Receipt 'Git' $gitPath $gitEntry $true $false
 
@@ -200,9 +208,9 @@ try {
     }
     Invoke-CourseUninstall
     Assert-Equal $script:Actions.Count 7
-    Assert-Equal ($script:Actions[0] -like 'prompt:*Node*') $true
+    Assert-Equal ($script:Actions[0] -like 'prompt:*Node.js*') $true
     Assert-Equal ($script:Actions[1] -like 'prompt:*Git*') $true
-    Assert-Equal ($script:Actions[2] -like 'prompt:*VSCode*') $true
+    Assert-Equal ($script:Actions[2] -like 'prompt:*VS Code*') $true
     Assert-Equal $script:Actions[3] 'remove:Node'
     Assert-Equal $script:Actions[4] 'remove:VSCode'
     Assert-Equal $script:Actions[5] 'cleanup:temp'
@@ -267,7 +275,6 @@ try {
     Assert-Equal (Get-Receipt 'Git') $null
     Assert-Equal (Get-Receipt 'VSCode') $null
 
-    Remove-Item -LiteralPath $nodeDirectory -Recurse -Force
     $null = $script:Available.Remove('node.exe')
     Assert-Throws { Install-Node $architecture $testRoot } 'Unexpected download'
 
