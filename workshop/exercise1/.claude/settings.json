@@ -1,0 +1,11 @@
+{
+  "defaultMode": "acceptEdits",
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev*)",
+      "Bash(npm run build*)",
+      "Bash(npm run preview*)"
+    ],
+    "deny": ["Bash(git *)"]
+  }
+}
