@@ -1,3 +1,7 @@
-calculator/node_modules/
-calculator/dist/
-*.log
+**/node_modules/
+**/dist/
+**/.DS_Store
+**/*.local
+**/.vite/
+**/.npm-cache/
+.claude/.cc-writes

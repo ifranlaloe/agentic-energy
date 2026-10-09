@@ -1,4 +1,35 @@
-# Windows setup without administrator rights
+# AI-enabled Software Delivery – Session 1 workshop
+
+Facilitator repository for the **Work differently with AI** hands-on session.
+
+---
+
+## Repository structure
+
+| Path | Contents |
+|---|---|
+| `workshop/exercise1/` | Exercise 1 starting state – baseline Northwind Energy app, no offer comparison |
+| `workshop/exercise2/` | Exercise 2 starting state – comparison feature built + `/docs` context |
+| `FACILITATOR.md` | Setup checklist, delivery guide, and recovery scenarios |
+| `setup-environment.ps1` | Windows per-user installer (Node, Git, VS Code) |
+| `uninstall-environment.ps1` | Reverses only what setup installed |
+| `calculator/` | TypeScript smoke-test app to verify the environment setup |
+
+*Northwind Energy is a fictional product created for workshop purposes only.*
+
+---
+
+## Facilitator quick start
+
+1. Clone or download this repository.
+2. Run `setup-environment.ps1` on participant Windows machines (see section below).
+3. Read `FACILITATOR.md` for the complete delivery and recovery guide.
+4. Share `workshop/exercise1/` and `workshop/exercise2/` with participants (e.g. as a zip).
+5. Participants open **one folder** at a time in VS Code, run `npm install` once, then `npm run dev`.
+
+---
+
+## Windows environment setup
 
 The `setup-environment.ps1` script sets up the following for the current user when it is not already available:
 
@@ -8,7 +39,7 @@ The `setup-environment.ps1` script sets up the following for the current user wh
 
 The scripts support Windows x64 and ARM64, require neither WSL nor Docker, and do not change system-wide settings. New Node.js installs are placed under `%LOCALAPPDATA%\AI-Development-Course`; new Git and VS Code installs are per-user. Downloads come from the official vendors: Node and Git are verified with SHA-256, and the VS Code installer with a Microsoft digital signature. Setup records only what it installed or added to your PATH so that uninstall can leave pre-existing software alone.
 
-## 1. Check what's already installed
+### 1. Check what's already installed
 
 Download this repository as a ZIP from GitHub and extract it, keeping the `scripts/` folder beside the setup and uninstall scripts. Open **64-bit Windows PowerShell** (not as administrator) in the extracted directory. Check what is already available:
 
@@ -21,7 +52,7 @@ code --version
 
 Errors saying a command is not recognized are expected when a tool is not installed.
 
-## 2. Temporarily allow scripts (if needed)
+### 2. Temporarily allow scripts (if needed)
 
 If PowerShell blocks the setup script, **only if your IT policy allows it**, run this in the same PowerShell window before setup:
 
@@ -31,7 +62,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 `Process` scope expires when you close the window; it does not change the `LocalMachine` or `CurrentUser` policy and cannot override an IT-enforced `MachinePolicy` or `UserPolicy`. Do not run scripts you have not reviewed or that IT has not approved.
 
-## 3. Run setup
+### 3. Run setup
 
 In that PowerShell window, run:
 
@@ -54,7 +85,7 @@ Open VS Code and sign in with your own GitHub account; confirm Copilot Chat actu
 
 TypeScript, testing, and linting tools belong in the course project as project dependencies with a `package-lock.json`. This script intentionally does not install these packages globally.
 
-## 4. Try the calculator
+### 4. Try the calculator
 
 The [`calculator/`](calculator/) directory contains a small browser app written in plain TypeScript. It checks that npm can install packages, TypeScript can compile, tests can run, and a local app can open in a browser. From a **new PowerShell terminal** after running setup:
 
@@ -72,7 +103,7 @@ Open the local address printed by Vite (normally `http://127.0.0.1:5173/`). Try 
 
 The app listens on your computer only. IT must also allow access to `registry.npmjs.org` for `npm.cmd ci` and local loopback traffic for the preview. Copilot requires a separate GitHub sign-in in VS Code.
 
-## 5. Uninstall the course environment (optional)
+### 5. Uninstall the course environment (optional)
 
 Close VS Code and any apps using Git or Node.js. From **Windows PowerShell** (not as administrator) in the extracted repository, run:
 
