@@ -164,6 +164,37 @@ conflict — they want the cheapest price and renewable sourcing?"
 
 ---
 
+## Closing exercise — code review skill (after Exercise 2)
+
+This is an optional closing step for when participants have finished Exercise 2.
+It works best after the debrief question "What would it take to know whether what was built is correct?" has landed.
+
+### What it does
+
+A pre-written skill instructs Claude to review the Exercise 2 codebase across four dimensions
+(code quality, maintainability, security, architecture) and produce a scored report card.
+The scoring has a **hard ceiling of 6/10** — workshop code without tests, CI, or a real backend
+cannot score higher. The output is intentionally critical to start a conversation about what
+production-readiness actually requires.
+
+### How to activate it
+
+Ask participants to type this in the Claude Code chat:
+
+```
+Read .agents/skills/northwind-review.md and run the review on this codebase.
+```
+
+Claude reads the guidance file and follows it. No copying, no setup. No code is changed.
+
+### Debrief prompts after the review
+
+- "Were any of these findings surprising?"
+- "Which of these would a code review in your team have caught?"
+- "What would you need to add to get from a 4 to a 7 — and what does that tell you about AI-assisted development?"
+
+---
+
 ## Debrief prompts (after Exercise 2)
 
 - "What was different about the plan you saw before any code was written?"
