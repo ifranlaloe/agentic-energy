@@ -6,14 +6,27 @@
 
 | Requirement | Check |
 |---|---|
-| Node.js 22.x | `node --version` → `v22.*` |
+| Node.js 22.12+ LTS or 24+ | `node --version` → `v22.12.0` or later, even-numbered major |
 | npm 10+ | `npm --version` |
 | VS Code | Open and launch |
 | Claude Code VS Code extension | Installed and signed in |
 
 > **Node version floor**: Vite 8 requires Node ≥ 20.19 or ≥ 22.12.
 > Node 18 or 20.x < 20.19 will not start the dev server.
-> Use `nvm use 22` or install from nodejs.org.
+> Use `nvm use 22`, or let the setup script install Node for you.
+
+The setup scripts install Node.js 24 LTS and accept any existing 22.12+ or 24+
+installation, so both report a supported version. Odd-numbered majors (21, 23)
+are not LTS and are rejected.
+
+| Platform | Setup | Uninstall |
+|---|---|---|
+| Windows | `.\setup-environment.ps1` | `.\uninstall-environment.ps1` |
+| macOS | `./setup-environment.sh` | Manual — see the README |
+
+On macOS the script needs no sudo. Git comes from the Xcode Command Line Tools
+(`xcode-select --install`) or Homebrew; if neither is present the script stops
+and says so, so have participants run `xcode-select --install` beforehand.
 
 ---
 
@@ -107,7 +120,7 @@ Check that `npm run dev` is running and the browser is at http://localhost:5173.
 
 **App does not run / dev server error**
 Re-extract a fresh `workshop/exercise1/` folder (see Recovery above).
-If that fails, check `node --version` — must be `v22.*`.
+If that fails, check `node --version` — must be `v22.12.0`+ or `v24`+.
 
 **Agent breaks the app (compilation error)**
 Vite strips TypeScript at runtime — a type error never blanks the screen.
