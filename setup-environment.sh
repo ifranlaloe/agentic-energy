@@ -269,7 +269,7 @@ install_vscode() {
 }
 
 show_next_steps() {
-    printf 'Done. Open a new terminal, then sign in to GitHub in VS Code to use its built-in Copilot features.\n'
+    printf '%s\n' 'Done. Your environment is ready. Open a new terminal before you start, so it picks up any PATH changes.'
 }
 
 main() {

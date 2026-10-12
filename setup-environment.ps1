@@ -192,7 +192,7 @@ function Install-VSCode {
 }
 
 function Show-NextSteps {
-    Write-Host 'Done. Open a new terminal, then sign in to GitHub in VS Code to use its built-in Copilot features.'
+    Write-Host 'Done. Your environment is ready. Open a new terminal before you start, so it picks up any PATH changes.'
 }
 
 function Invoke-CourseSetup {
