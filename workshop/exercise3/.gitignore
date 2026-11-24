@@ -1,0 +1,8 @@
+node_modules
+dist
+.DS_Store
+*.local
+.vite
+.npm-cache
+.npm-cache
+.claude/.cc-writes
